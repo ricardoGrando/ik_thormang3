@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<launch>
+  
+  
+  <node pkg="ik_thormang3"  type="thormang3_Kinematics" name="thormang3_Kinematics" output="screen"/>
+  <node pkg="ik_thormang3"  type="LinearPlanner.py" name="LinearPlanner" output="screen"/>
+
+ </launch>
