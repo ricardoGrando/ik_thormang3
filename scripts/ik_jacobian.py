@@ -29,8 +29,6 @@ class IK_Jacobian:
               
         deltaAngles = np.dot(inverseJacobian, delta) 
         
-        
-        
         if deltaAngles.max() < 0.1 and deltaAngles.min() > -0.1:
         
             endpose = self.curr_pose
@@ -43,7 +41,7 @@ class IK_Jacobian:
             self.now_cal = False
             
         else:
-            print("error deltaAngles",deltaAngles)
+            #print("error deltaAngles",deltaAngles)
             self.result = self.curr_pose
             self.now_cal = False
         
