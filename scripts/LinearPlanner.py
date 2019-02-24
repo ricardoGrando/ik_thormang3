@@ -157,18 +157,21 @@ class LinearPlanner:
             print ("Deu ruim: %s"%e)
 
     def linearplanner_callback(self,msg):
-        #print("px: " + str(msg.px) + " py: " + str(msg.py) + " pz: " + str(msg.pz))
-    	#print("ow: " + str(msg.ow) + " ox: " + str(msg.ox) + " oy: " + str(msg.oy) + " oz: " + str(msg.oz))
-    	self.target_pose = np.array([msg.px, msg.py, msg.pz, msg.ow, msg.ox, msg.oy, msg.oz])
+        self.target_pose = np.array([msg.px, msg.py, msg.pz, msg.ow, msg.ox, msg.oy, msg.oz])
     	        
         arm_type = "left_arm"
 
         print("Press to start")
         raw_input()
 
+        ##############################################################
+        # Step size to create the trajectory(Desired distance between each point)
         step = 0.03
+        # Size to increment after the test with the 'step'
         step_size = 0.001
+        # Radius on the spiral
         spiral_radius = 0.1
+        # Number of spirals
         number_spirals = 2
 
         while(step < spiral_radius):
@@ -187,8 +190,10 @@ class LinearPlanner:
             
             i = 0
 
+            # Saves the real distance of eacj point in the trajectory
             self.writeDistanceToFile("/home/"+getpass.getuser()+"/catkin_ws/src/ik_thormang3/outputs/jac/jac_"+str(step), d)
 
+            # Goes through each point of the trajectory
             while(i < trajectory.shape[0]-1):
 
                 print("Press to go to the next point in the trajectory")
@@ -200,15 +205,18 @@ class LinearPlanner:
                     curr = self.right_arm_position.copy()
                 
                 angles = np.array([self.joint_pose['l_arm_sh_p1'], self.joint_pose['l_arm_sh_r'], self.joint_pose['l_arm_sh_p2'], self.joint_pose['l_arm_el_y'], self.joint_pose['l_arm_wr_r'], self.joint_pose['l_arm_wr_y'], self.joint_pose['l_arm_wr_p']])
-
+                
+                # Saves the error based of where it goes(curr) and where it should have gone(trajectory[i-1])
                 if i > 0:
                     # print("Curr position: "+str(curr))
                     # print("Desired position: "+str(trajectory[i-1]))
                     
                     self.writeToFile("/home/"+getpass.getuser()+"/catkin_ws/src/ik_thormang3/outputs/jac/jac_"+str(step), curr, trajectory[i-1], angles)
 
+                # Calculates the delta
                 delta = cal_rpy_delta(trajectory[i], curr)
 
+                # Calls the ik with the jacobian(False)
                 result = self.IK_J.cal(self.joint_pose, delta, arm_type, False)
                 
                 # print("###########################################")
@@ -219,8 +227,10 @@ class LinearPlanner:
                 # print("EndEffector: "+str(self.left_arm_position))
                 # print("###########################################")
 
+                # Publishes on the gazebo topics
                 self.publishOnGazeboTopics(result, curr, True)
 
+                # Control the robot
                 self.controlRobot(result)
 
                 i += 1
@@ -240,6 +250,7 @@ class LinearPlanner:
             
             i = 0
 
+            # Saves the distance between each point of the trajectory in the file
             self.writeDistanceToFile("/home/"+getpass.getuser()+"/catkin_ws/src/ik_thormang3/outputs/net/net_"+str(step), d)
 
             while(i < trajectory.shape[0]-1):
@@ -255,13 +266,15 @@ class LinearPlanner:
                 angles = np.array([self.joint_pose['l_arm_sh_p1'], self.joint_pose['l_arm_sh_r'], self.joint_pose['l_arm_sh_p2'], self.joint_pose['l_arm_el_y'], self.joint_pose['l_arm_wr_r'], self.joint_pose['l_arm_wr_y'], self.joint_pose['l_arm_wr_p']])
 
                 if i > 0:
-                    print("Curr position: "+str(curr))
-                    print("Desired position: "+str(trajectory[i-1]))
+                    # print("Curr position: "+str(curr))
+                    # print("Desired position: "+str(trajectory[i-1]))
                     
                     self.writeToFile("/home/"+getpass.getuser()+"/catkin_ws/src/ik_thormang3/outputs/net/net_"+str(step), curr, trajectory[i-1], angles)
 
+                # Calculates the delta
                 delta = trajectory[i] - curr              
 
+                # Makes the ik using the net(True)
                 result = self.IK_J.cal(self.joint_pose, delta, arm_type, True)
                 
                 # print("###########################################")
@@ -272,8 +285,10 @@ class LinearPlanner:
                 # print("EndEffector: "+str(self.left_arm_position))
                 # print("###########################################")
 
+                # Publishes on gazebo topics
                 self.publishOnGazeboTopics(result, curr, True)
 
+                # Control the robot
                 self.controlRobot(result)
 
                 i += 1
