@@ -173,6 +173,7 @@ class LinearPlanner:
         spiral_radius = 0.1
         # Number of spirals
         number_spirals = 2
+        ################################################################
 
         while(step < spiral_radius):
 
