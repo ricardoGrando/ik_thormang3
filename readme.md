@@ -35,7 +35,7 @@ git clone https://github.com/AravindaDP/humanoid_navigation.git
 (press gazebo run button first otherwise rosnode will not show any thing)
 3. roslaunch ik_thormang3 ik_thormang3_demo.launch
 4. Publishes a initial position. Example: rostopic pub -1 /thormang3/LinearPlanner ik_thormang3/IK "{px: 0.43, py: 0.462, pz: 1.021, ow: 1.0, ox: 0.0, oy: 0.0, oz: 0.0, num: 100}" 
-5. Goes to terminal 3 and press to start and to do the tests
+5. Go to terminal 3 and press to start and to do the tests
 
 
 ### pub ros node
