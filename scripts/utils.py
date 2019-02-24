@@ -3,6 +3,22 @@
 import math
 import numpy as np
 
+def normalizeArray(list, highestList, lowestList):
+    newList = np.zeros(shape=(14,1))
+    for i in range(0, list.shape[0]):
+        #print (list[i])
+        #print (highestList[i])
+        newList[i] = ((list[i] - lowestList[i])/(highestList[i] - lowestList[i]))*(0.9-(0.1)) + 0.1 
+                    
+    return newList
+    
+def desnormalizeArray(list, highestList, lowestList):
+    newList = np.zeros(shape=(7,1))
+    for i in range(0, list.shape[0]):
+        newList[i] = ((list[i]-0.1)*(highestList[i] - lowestList[i])/((0.9-(0.1))) + lowestList[i])
+                
+    return newList
+
 def get_left_arm_pose(joint_pose):
     left_arm_name = ['l_arm_sh_p1','l_arm_sh_r','l_arm_sh_p2','l_arm_el_y','l_arm_wr_r','l_arm_wr_y','l_arm_wr_p']
     left_arm_pose = []

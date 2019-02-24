@@ -9,6 +9,12 @@ import numpy as np
 from utils import *
 from ik_jacobian import *
 from std_msgs.msg import Float64
+from gazebo_msgs.srv import SpawnModel
+import geometry_msgs.msg
+from random import randint
+import getpass
+from keras.models import load_model
+from keras.models import Model
 
 pubList =  [    '/thormang3/l_arm_sh_p1_position/command', # -1.6 to 1.6
                 '/thormang3/l_arm_sh_r_position/command', # -1.6 to 1.6
@@ -28,21 +34,86 @@ class LinearPlanner:
         self.right_arm_position = []
         
         self.IK_J = IK_Jacobian()
-    
-    def linearplanner_callback(self,msg):
-        print("px: " + str(msg.px) + " py: " + str(msg.py) + " pz: " + str(msg.pz))
-    	print("ow: " + str(msg.ow) + " ox: " + str(msg.ox) + " oy: " + str(msg.oy) + " oz: " + str(msg.oz))
-    	self.target_pose = np.array([msg.px, msg.py, msg.pz, msg.ow, msg.ox, msg.oy, msg.oz])
-    	
-    	arm_type = "left_arm"
 
-        arr = []
-    	
-    	### step num
-    	num = int(msg.num)
-        #print(num)
-    	
-    	### get each step value for linearplanner 
+    def spiral(self, stepSize, radius, endEffectorPosition, numberSpirals):
+        endEffector = np.zeros(shape=(int(2*math.pi*radius/stepSize)*numberSpirals,7))
+        endEffector[:] = endEffectorPosition
+            
+        angle = math.asin(stepSize/(radius))
+        
+        for i in range(0, endEffector.shape[0]):
+            endEffector[i][2] = endEffector[i][2] - radius*stepSize*(i+1)       
+            endEffector[i][0] = endEffector[i][0] + radius*math.cos(angle*(i+1)) - radius
+            endEffector[i][1] = endEffector[i][1] + radius*math.sin(angle*(i+1))
+            
+            if i > 0:
+                dx = (endEffector[i][0] - endEffector[i-1][0])
+                dy = (endEffector[i][1] - endEffector[i-1][1])
+                dz = (endEffector[i][2] - endEffector[i-1][2])
+                d =  ( dx**2 + dy**2 + dz**2 )**(0.5)                
+        
+        return endEffector, d
+
+    def writeToFile(self, name, calculated, desired, angles):
+        file = open(name+".txt","a")
+        string = str(calculated[0])+','+str(calculated[1])+','+str(calculated[2])+','\
+                +str(calculated[3])+','+str(calculated[4])+','+str(calculated[5])+','+str(calculated[6])+','\
+                +str(desired[0])+','+str(desired[1])+','+str(desired[2])+','+str(desired[3])+','+str(desired[4])+','\
+                +str(desired[5])+','+str(desired[6])+','\
+                +str(angles[0])+','+str(angles[1])+','+str(angles[2])+','+str(angles[3])+','\
+                +str(angles[4])+','+str(angles[5])+','+str(angles[6])
+
+        file.write(str(string+'\n'))
+        file.close()
+
+    def writeDistanceToFile(self, name, d):
+        file = open(name+".txt","w")    
+        file.write(str(d)+'\n')
+        file.close()
+
+    def publishOnGazeboTopics(self, result, curr, trajectoryFlag):
+        #for i in range(0,10):
+        self.pub = rospy.Publisher(pubList[0], Float64, queue_size=100)
+        self.pub.publish(Float64(result['l_arm_sh_p1']))
+        self.pub = rospy.Publisher(pubList[1], Float64, queue_size=100)
+        self.pub.publish(Float64(result['l_arm_sh_r']))
+        self.pub = rospy.Publisher(pubList[2], Float64, queue_size=100)
+        self.pub.publish(Float64(result['l_arm_sh_p2']))
+        self.pub = rospy.Publisher(pubList[3], Float64, queue_size=100)
+        self.pub.publish(Float64(result['l_arm_el_y']))
+        self.pub = rospy.Publisher(pubList[4], Float64, queue_size=100)
+        self.pub.publish(Float64(result['l_arm_wr_r']))
+        self.pub = rospy.Publisher(pubList[5], Float64, queue_size=100)
+        self.pub.publish(Float64(result['l_arm_wr_y']))
+        self.pub = rospy.Publisher(pubList[6], Float64, queue_size=100)
+        self.pub.publish(Float64(result['l_arm_wr_p']))
+
+        # if trajectoryFlag:
+        #     self.spawnObject(curr[0], curr[1], curr[2])
+        # else:
+        #     pass
+
+    def controlRobot(self, result):
+        ### control the robot
+        joint = JointState()
+        joint.name = result.keys()
+        joint.position = result.values()
+        self.set_joint_pub.publish(joint)
+
+    def getArmEndEffectorCartesianPosition(self, arm_type):
+         ### get current end position
+        if arm_type == "left_arm":
+            curr = self.left_arm_position.copy()
+        elif arm_type == "right_arm":
+            curr = self.right_arm_position.copy()
+
+        return curr
+
+    def setInitialPosition(self, arm_type, num):
+
+        arr = [] 
+
+        ### get each step value for linearplanner 
     	if arm_type == "left_arm":
     	    for i in range(7):
     	        arr.append(np.linspace(self.left_arm_position[i],self.target_pose[i],num))
@@ -50,60 +121,171 @@ class LinearPlanner:
     	    for i in range(7):
     	        arr.append(np.linspace(self.right_arm_position[i],self.target_pose[i],num))
      	
-        #print(arr)
-    		
-    	arr = np.array(arr).T
-        print(arr)
-    	
+        arr = np.array(arr).T
+        
     	for j in range(1,num):
     	    
-    	    ### get current end position
-    	    if arm_type == "left_arm":
-    	        curr = self.left_arm_position.copy()
-    	    elif arm_type == "right_arm":
-    	        curr = self.right_arm_position.copy()
+    	    curr = self.getArmEndEffectorCartesianPosition(arm_type)
     	        
     	    ### calulate the delta in rpy space
     	    delta = cal_rpy_delta(arr[j] , curr)
-            print("###########################################")
-            print("Delta: "+str(delta))
-    	    
-    	    ### calculate ik jacobain or nn jacobain
-    	    # TODO 
-            #print(self.joint_pose)
-    	    result = self.IK_J.cal(self.joint_pose, delta, arm_type)
-            print("###########################################")
-            print("Delta Angles: ")
-            print(self.joint_pose['l_arm_sh_p1'], self.joint_pose['l_arm_sh_r'], self.joint_pose['l_arm_sh_p2'], self.joint_pose['l_arm_el_y'], self.joint_pose['l_arm_wr_r'], self.joint_pose['l_arm_wr_y'], self.joint_pose['l_arm_wr_p'])
-    	    print("###########################################")
-            print("EndEffector: "+str(self.left_arm_position))
-            print("###########################################")
-            print(result['l_arm_sh_p1'])
             
-            self.pub = rospy.Publisher(pubList[0], Float64, queue_size=10)
-            self.pub.publish(Float64(result['l_arm_sh_p1']))
-            self.pub = rospy.Publisher(pubList[1], Float64, queue_size=10)
-            self.pub.publish(Float64(result['l_arm_sh_r']))
-            self.pub = rospy.Publisher(pubList[2], Float64, queue_size=10)
-            self.pub.publish(Float64(result['l_arm_sh_p2']))
-            self.pub = rospy.Publisher(pubList[3], Float64, queue_size=10)
-            self.pub.publish(Float64(result['l_arm_el_y']))
-            self.pub = rospy.Publisher(pubList[4], Float64, queue_size=10)
-            self.pub.publish(Float64(result['l_arm_wr_r']))
-            self.pub = rospy.Publisher(pubList[5], Float64, queue_size=10)
-            self.pub.publish(Float64(result['l_arm_wr_y']))
-            self.pub = rospy.Publisher(pubList[6], Float64, queue_size=10)
-            self.pub.publish(Float64(result['l_arm_wr_p']))
+    	    result = self.IK_J.cal(self.joint_pose, delta, arm_type, False)            
+            
+            self.publishOnGazeboTopics(result, curr, False)
 
-            #print(result)
-    	    ### control the robot
-    	    joint = JointState()
-            joint.name = result.keys()
-            joint.position = result.values()
-            self.set_joint_pub.publish(joint)
+            self.controlRobot(result)
 
-            #raw_input()
-      
+    def spawnObject(self, posx, posy, posz):
+        e = 0
+        try:
+            spawn = rospy.ServiceProxy("gazebo/spawn_sdf_model", SpawnModel)
+
+            rospy.wait_for_service("gazebo/spawn_sdf_model")
+
+            initial_pose = geometry_msgs.msg.Pose()
+            initial_pose.position.x = posx
+            initial_pose.position.y = posy
+            initial_pose.position.z = posz+0.18
+
+            f = open('/home/ricardo/.gazebo/models/cube_spiral/model.sdf','r')
+            sdff = f.read()
+
+            print spawn("cube"+str(randint(0, 100000)), sdff, "default", initial_pose, "world")
+
+        except (rospy.ServiceException, e):
+            print ("Deu ruim: %s"%e)
+
+    def linearplanner_callback(self,msg):
+        #print("px: " + str(msg.px) + " py: " + str(msg.py) + " pz: " + str(msg.pz))
+    	#print("ow: " + str(msg.ow) + " ox: " + str(msg.ox) + " oy: " + str(msg.oy) + " oz: " + str(msg.oz))
+    	self.target_pose = np.array([msg.px, msg.py, msg.pz, msg.ow, msg.ox, msg.oy, msg.oz])
+    	        
+        arm_type = "left_arm"
+
+        print("Press to start")
+        raw_input()
+
+        step = 0.03
+        step_size = 0.001
+        spiral_radius = 0.1
+        number_spirals = 2
+
+        while(step < spiral_radius):
+
+            print("Going to initial position to start the test with jacobian....")
+            self.setInitialPosition(arm_type, int(msg.num))
+            print("Initial position reached")
+
+            ### get current end position
+            if arm_type == "left_arm":
+                curr = self.left_arm_position.copy()
+            elif arm_type == "right_arm":
+                curr = self.right_arm_position.copy()
+                
+            trajectory, d = self.spiral(step, spiral_radius, curr, number_spirals)
+            
+            i = 0
+
+            self.writeDistanceToFile("/home/"+getpass.getuser()+"/catkin_ws/src/ik_thormang3/outputs/jac/jac_"+str(step), d)
+
+            while(i < trajectory.shape[0]-1):
+
+                print("Press to go to the next point in the trajectory")
+                raw_input()
+
+                if arm_type == "left_arm":
+                    curr = self.left_arm_position.copy()
+                elif arm_type == "right_arm":
+                    curr = self.right_arm_position.copy()
+                
+                angles = np.array([self.joint_pose['l_arm_sh_p1'], self.joint_pose['l_arm_sh_r'], self.joint_pose['l_arm_sh_p2'], self.joint_pose['l_arm_el_y'], self.joint_pose['l_arm_wr_r'], self.joint_pose['l_arm_wr_y'], self.joint_pose['l_arm_wr_p']])
+
+                if i > 0:
+                    # print("Curr position: "+str(curr))
+                    # print("Desired position: "+str(trajectory[i-1]))
+                    
+                    self.writeToFile("/home/"+getpass.getuser()+"/catkin_ws/src/ik_thormang3/outputs/jac/jac_"+str(step), curr, trajectory[i-1], angles)
+
+                delta = cal_rpy_delta(trajectory[i], curr)
+
+                result = self.IK_J.cal(self.joint_pose, delta, arm_type, False)
+                
+                # print("###########################################")
+                # print("Delta End Effector"+str(trajectory[i+1]-self.left_arm_position))
+                # print("Delta Angles: "+str(delta))
+                # print("Angles: ")
+                # print(str(angles))
+                # print("EndEffector: "+str(self.left_arm_position))
+                # print("###########################################")
+
+                self.publishOnGazeboTopics(result, curr, True)
+
+                self.controlRobot(result)
+
+                i += 1
+
+            # print("###########################################")
+            print("Finished trajectory with jacobian with step "+str(d))
+
+            print("Going to initial position to start the test with net....")
+            self.setInitialPosition(arm_type, int(msg.num))
+            print("Initial position reached")
+
+            ### get current end position
+            if arm_type == "left_arm":
+                curr = self.left_arm_position.copy()
+            elif arm_type == "right_arm":
+                curr = self.right_arm_position.copy()                
+            
+            i = 0
+
+            self.writeDistanceToFile("/home/"+getpass.getuser()+"/catkin_ws/src/ik_thormang3/outputs/net/net_"+str(step), d)
+
+            while(i < trajectory.shape[0]-1):
+
+                print("Press to go to the next point in the trajectory")
+                raw_input()
+
+                if arm_type == "left_arm":
+                    curr = self.left_arm_position.copy()
+                elif arm_type == "right_arm":
+                    curr = self.right_arm_position.copy()
+                
+                angles = np.array([self.joint_pose['l_arm_sh_p1'], self.joint_pose['l_arm_sh_r'], self.joint_pose['l_arm_sh_p2'], self.joint_pose['l_arm_el_y'], self.joint_pose['l_arm_wr_r'], self.joint_pose['l_arm_wr_y'], self.joint_pose['l_arm_wr_p']])
+
+                if i > 0:
+                    print("Curr position: "+str(curr))
+                    print("Desired position: "+str(trajectory[i-1]))
+                    
+                    self.writeToFile("/home/"+getpass.getuser()+"/catkin_ws/src/ik_thormang3/outputs/net/net_"+str(step), curr, trajectory[i-1], angles)
+
+                delta = trajectory[i] - curr              
+
+                result = self.IK_J.cal(self.joint_pose, delta, arm_type, True)
+                
+                # print("###########################################")
+                # print("Delta End Effector"+str(trajectory[i+1]-self.left_arm_position))
+                # print("Delta Angles: "+str(delta))
+                # print("Angles: ")
+                # print(str(angles))
+                # print("EndEffector: "+str(self.left_arm_position))
+                # print("###########################################")
+
+                self.publishOnGazeboTopics(result, curr, True)
+
+                self.controlRobot(result)
+
+                i += 1
+
+            # print("###########################################")
+            print("Finished trajectory with net with step "+str(d))           
+
+            print("Press to increase the step size")            
+            raw_input()
+
+            step += step_size
+
     def present_joint_states_callback(self,msg):
         self.joint_pose = dict(zip(msg.name, msg.position))
         self.fk_pub.publish(msg)
